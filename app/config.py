@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MODELS_DIR = ROOT / "models"
-FD_DIR = MODELS_DIR / "face_detection"
+FD_DIR = MODELS_DIR / "face_detection_new"
 
 def _latest(paths):
     paths = [p for p in paths if p.exists()]
@@ -31,10 +31,10 @@ def _auto_weights() -> Path:
 WEIGHTS_PATH = Path(os.getenv("WEIGHTS_PATH", _auto_weights()))
 
 # Inference knobs
-CONF     = float(os.getenv("CONF", "0.35"))
+CONF     = float(os.getenv("CONF", "0.7"))
 IOU      = float(os.getenv("IOU", "0.5"))
-IMG_SIZE = 320
-DEVICE   = 0
+IMG_SIZE = 2208
+DEVICE   = "cpu"
 
 # Video / UI
 CAM_INDEX   = int(os.getenv("CAM_INDEX", "0"))
