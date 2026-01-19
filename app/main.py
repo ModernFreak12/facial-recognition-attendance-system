@@ -3,7 +3,7 @@ from pathlib import Path
 from datetime import datetime
 
 from app.config import WEIGHTS_PATH, CONF, IOU, IMG_SIZE, DEVICE, CAM_INDEX, SHOW_FPS, WINDOW_NAME
-from app.detectors.face_detector import FaceDetector
+from app.detection.face_detector import FaceDetector
 from app.utils.video import open_camera, release_camera, FPS
 from app.utils.drawing import draw_detections
 
