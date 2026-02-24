@@ -4,7 +4,7 @@ from numpy.linalg import norm
 from app.services.supabase_client import supabase
 
 
-THRESHOLD = 0.55  # ArcFace recommended threshold ~0.5–0.6
+THRESHOLD = 0.70
 
 
 def _parse_embedding(raw):

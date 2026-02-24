@@ -106,7 +106,7 @@ def main():
     # Load modules
     detector = FaceDetector(Path(WEIGHTS_PATH), device=DEVICE, conf=CONF, iou=IOU, img_size=IMG_SIZE)
     
-    landm = LandmarkDetector(device=DEVICE)
+    landm = LandmarkDetector()
     recognizer = FaceRecognizer(device=DEVICE)
 
     # --------------------------------------------------------

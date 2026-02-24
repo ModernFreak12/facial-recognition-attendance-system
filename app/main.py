@@ -46,8 +46,8 @@ def main():
     print(f"[i] Loading YOLO detection model: {Path(WEIGHTS_PATH).resolve()}")
     detector = FaceDetector(Path(WEIGHTS_PATH), device=DEVICE, conf=CONF, iou=IOU, img_size=IMG_SIZE)
 
-    print("[i] Loading 5-landmark model (2DFAN)...")
-    landm = LandmarkDetector(device=DEVICE)
+    print("[i] Loading landmark model ...")
+    landm = LandmarkDetector()
 
     print("[i] Loading ArcFace embedding model...")
     recognizer = FaceRecognizer(device=DEVICE)
@@ -116,28 +116,31 @@ def main():
 
             for det in detections:
                 x1, y1, x2, y2 = extract_bbox(det)
-                x1 = int(max(0, x1))
-                y1 = int(max(0, y1))
-                x2 = int(min(snapshot.shape[1], x2))
-                y2 = int(min(snapshot.shape[0], y2))
+                pad = 40  # increased from whatever it is now
+                x1p = int(max(0, x1 - pad))
+                y1p = int(max(0, y1 - pad))
+                x2p = int(min(snapshot.shape[1], x2 + pad))
+                y2p = int(min(snapshot.shape[0], y2 + pad))
 
-                crop = snapshot[y1:y2, x1:x2]
+                crop = snapshot[y1p:y2p, x1p:x2p]
+                
                 if crop.size == 0:
+                    print("[!] Skipping: empty crop")
                     continue
 
-                # Landmarks
                 lm = landm.predict(crop)
                 if lm is None:
+                    print("[!] Skipping: no landmarks found")
                     continue
 
-                # Align
                 aligned = align_face(crop, lm)
                 if aligned is None:
+                    print("[!] Skipping: alignment failed")
                     continue
 
-                # Embedding
                 emb = recognizer.get_embedding(aligned)
                 if emb is None:
+                    print("[!] Skipping: no embedding")
                     continue
 
                 # Match

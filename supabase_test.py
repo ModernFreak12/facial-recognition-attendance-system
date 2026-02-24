@@ -1,6 +1,7 @@
 from app.services.supabase_client import get_supabase
 supabase = get_supabase()
 
+
 data1 = {
     "univ_roll_no": "12200222047",
     "name": "Aayush Chowdhury",
