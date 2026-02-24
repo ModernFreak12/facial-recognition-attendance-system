@@ -78,4 +78,4 @@ FACE_RECOGNITION_MODEL = FR_DIR / "arc.onnx"
 # -------------------------------------------------------------
 # FACE LANDMARK DETECTOR (5-point ONNX)
 # -------------------------------------------------------------
-LANDMARK_MODEL = LM_DIR / "2dfan4.onnx"       # NEW
+LANDMARK_MODEL = LM_DIR / "scrfd_10g_bnkps.onnx"       # NEW
