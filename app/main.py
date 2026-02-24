@@ -1,100 +1,166 @@
 import cv2
 from pathlib import Path
-from datetime import datetime
 
-from app.config import WEIGHTS_PATH, CONF, IOU, IMG_SIZE, DEVICE, CAM_INDEX, SHOW_FPS, WINDOW_NAME
+from app.config.config import (
+    WEIGHTS_PATH, CONF, IOU, IMG_SIZE, DEVICE,
+    CAM_INDEX, SHOW_FPS, WINDOW_NAME,
+    MOBILE_CAM_URL
+)
+
 from app.detection.face_detector import FaceDetector
+from app.landmarks.landmark_detector import LandmarkDetector
+from app.utils.alignment import align_face
+from app.recognition.face_recognizer import FaceRecognizer
+from app.recognition.matcher import Matcher
+from app.services.supabase_client import supabase
 from app.utils.video import open_camera, release_camera, FPS
-from app.utils.drawing import draw_detections
+from app.utils.drawing import draw_label
 
 
+# -----------------------------------------------------------
+# Fetch student name from DB
+# -----------------------------------------------------------
+def get_student_name(student_id: str):
+    res = (
+        supabase.table("students")
+        .select("name")
+        .eq("student_id", student_id)
+        .execute()
+    )
+    return res.data[0]["name"] if res.data else "Unknown"
+
+
+# -----------------------------------------------------------
+# Extract bbox from detection dict
+# -----------------------------------------------------------
+def extract_bbox(det):
+    if "bbox" in det:
+        return det["bbox"]
+    return [det["x1"], det["y1"], det["x2"], det["y2"]]
+
+
+# -----------------------------------------------------------
+# MAIN APPLICATION (SNAPSHOT MODE)
+# -----------------------------------------------------------
 def main():
-    print(f"[i] Using weights: {Path(WEIGHTS_PATH).resolve()}")
+    print(f"[i] Loading YOLO detection model: {Path(WEIGHTS_PATH).resolve()}")
     detector = FaceDetector(Path(WEIGHTS_PATH), device=DEVICE, conf=CONF, iou=IOU, img_size=IMG_SIZE)
-    print("[i] Model loaded ✅")
 
-    cap = open_camera(CAM_INDEX, width=640, height=480)
-    fps = FPS()
+    print("[i] Loading 5-landmark model (2DFAN)...")
+    landm = LandmarkDetector(device=DEVICE)
+
+    print("[i] Loading ArcFace embedding model...")
+    recognizer = FaceRecognizer(device=DEVICE)
+
+    print("[i] Loading stored embeddings from database...")
+    matcher = Matcher()
+    print(f"[i] Loaded {len(matcher.student_ids)} student embeddings.\n")
+
+    # -------------------------------------------------------
+    # Open camera AFTER model load (important)
+    # -------------------------------------------------------
+    USE_MOBILE_CAMERA = True
+
+    if USE_MOBILE_CAMERA:
+        print("[i] Using mobile camera:", MOBILE_CAM_URL)
+        cap = cv2.VideoCapture(MOBILE_CAM_URL)
+    else:
+        cap = open_camera(CAM_INDEX, width=640, height=480)
+
+    if not cap.isOpened():
+        print("[!] ERROR: Could not open camera stream.")
+        return
+
+    # Warm-up frames for mobile MJPEG streams
+    for _ in range(10):
+        cap.read()
 
     cv2.namedWindow(WINDOW_NAME, cv2.WINDOW_NORMAL)
-    print("[i] Live preview ready — press 's' to capture & detect, 'q' to quit.")
+    fps = FPS()
 
-    # Create detections folder (auto)
-    save_dir = Path("detections")
-    save_dir.mkdir(exist_ok=True)
+    print("[i] Snapshot recognition ready — Press 's' to detect, 'q' to quit.\n")
 
-    last_vis = None
-    show_detection_frames = 0
+    # -------------------------------------------------------
+    # MAIN LOOP (NO YOLO HERE)
+    # -------------------------------------------------------
+    while True:
+        ok, frame = cap.read()
+        if not ok or frame is None:
+            print("[!] Failed to read frame. Retrying...")
+            continue
 
-    try:
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                print("[!] Failed to read frame.")
-                break
+        frame = cv2.flip(frame, 1)
 
-            # Flip horizontally (mirror view)
-            frame = cv2.flip(frame, 1)
+        # Display FPS
+        if SHOW_FPS:
+            fps.tick()
+            cv2.putText(frame, f"FPS: {fps.value:.1f}", (10, 25),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
-            # Show detection result for a few frames if exists
-            if last_vis is not None and show_detection_frames > 0:
-                display = last_vis
-                show_detection_frames -= 1
-            else:
-                display = frame
+        cv2.imshow(WINDOW_NAME, frame)
+        key = cv2.waitKey(1) & 0xFF
 
-            # Optional FPS overlay
-            if SHOW_FPS:
-                fps.tick()
-                cv2.putText(display, f"FPS: {fps.value:.1f}", (10, 25),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 3)
-                cv2.putText(display, f"FPS: {fps.value:.1f}", (10, 25),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+        # Quit
+        if key == ord("q"):
+            break
 
-            cv2.imshow(WINDOW_NAME, display)
+        # ---------------------------------------------------
+        # SNAPSHOT MODE — Only run full pipeline on 's'
+        # ---------------------------------------------------
+        if key == ord("s"):
+            snapshot = frame.copy()
+            print("\n[i] Snapshot captured — running face recognition...")
 
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord('q'):
-                break
+            detections = detector.predict(snapshot)
+            print(f"[i] Detected {len(detections)} face(s).")
 
-            elif key == ord('s'):
-                # Capture & detect on the CURRENT flipped frame
-                from datetime import datetime
-                import time, traceback
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                save_dir = Path("detections"); save_dir.mkdir(exist_ok=True)
-                raw_path = save_dir / f"raw_{timestamp}.jpg"
-                det_path = save_dir / f"det_{timestamp}.jpg"
+            for det in detections:
+                x1, y1, x2, y2 = extract_bbox(det)
+                x1 = int(max(0, x1))
+                y1 = int(max(0, y1))
+                x2 = int(min(snapshot.shape[1], x2))
+                y2 = int(min(snapshot.shape[0], y2))
 
-                # Save raw frame first so you always have evidence
-                cv2.imwrite(str(raw_path), frame)
-                print(f"\n[i] Captured frame at {timestamp}. Saved raw → {raw_path.resolve()}")
-                print("[i] Running detection...")
+                crop = snapshot[y1:y2, x1:x2]
+                if crop.size == 0:
+                    continue
 
-                # Time the predict call
-                dets = []
-                try:
-                    t0 = time.perf_counter()
-                    dets = detector.predict(frame)
-                    dt_ms = (time.perf_counter() - t0) * 1000
-                    print(f"[i] Detection OK: {len(dets)} boxes in {dt_ms:.1f} ms")
-                except Exception:
-                    print("🔥 YOLO predict error:")
-                    traceback.print_exc()
+                # Landmarks
+                lm = landm.predict(crop)
+                if lm is None:
+                    continue
 
-                # Draw (no confidence) and save annotated
-                vis = draw_detections(frame.copy(), dets, show_label=True, show_conf=False)
-                cv2.imwrite(str(det_path), vis)
-                print(f"[i] Saved annotated → {det_path.resolve()}")
+                # Align
+                aligned = align_face(crop, lm)
+                if aligned is None:
+                    continue
 
-                # Show annotated for ~1.5s so you SEE it worked
-                show_detection_frames = 45
-                last_vis = vis
+                # Embedding
+                emb = recognizer.get_embedding(aligned)
+                if emb is None:
+                    continue
+
+                # Match
+                student_id, score = matcher.match(emb)
+
+                if student_id:
+                    student_name = get_student_name(student_id)
+                    print(f"[MATCH] {student_name} ({student_id}) — score={score:.3f}")
+                else:
+                    student_name = "Unknown"
+                    print(f"[NO MATCH] score={score:.3f}")
+
+                # Draw on snapshot
+                draw_label(snapshot, (x1, y1, x2, y2), student_name)
+
+            # Show result for a moment
+            cv2.imshow("Recognition Result", snapshot)
+            cv2.waitKey(800)
 
 
-    finally:
-        release_camera(cap)
-        print("[i] Camera released and window closed ✅")
+    # Cleanup
+    release_camera(cap)
+    print("[i] Camera released — Exit clean.\n")
 
 
 if __name__ == "__main__":
