@@ -128,6 +128,7 @@ def main():
                     print("[!] Skipping: empty crop")
                     continue
 
+                '''
                 lm = landm.predict(crop)
                 if lm is None:
                     print("[!] Skipping: no landmarks found")
@@ -137,12 +138,52 @@ def main():
                 if aligned is None:
                     print("[!] Skipping: alignment failed")
                     continue
+                        # In main.py, after aligned = align_face(crop, lm)
+                import os
+                debug_dir = "debug_faces"
+                os.makedirs(debug_dir, exist_ok=True)
+
+                # Save crop before alignment
+                cv2.imwrite(f"{debug_dir}/crop.png", crop)
+
+                # Draw landmarks on crop
+                crop_lm = crop.copy()
+                for (x, y) in lm:
+                    cv2.circle(crop_lm, (int(x), int(y)), 3, (0, 255, 0), -1)
+                cv2.imwrite(f"{debug_dir}/crop_with_landmarks.png", crop_lm)
+
+                # Save aligned
+                cv2.imwrite(f"{debug_dir}/aligned.png", aligned)
+
+                print(f"[DEBUG] Saved debug images to {debug_dir}/")
+                '''
+
+                aligned = cv2.resize(crop, (112, 112))
 
                 emb = recognizer.get_embedding(aligned)
                 if emb is None:
                     print("[!] Skipping: no embedding")
                     continue
 
+
+                    # -----------------------------------------------
+                # DEBUG — Print similarity scores for all students
+                # -----------------------------------------------
+                from numpy.linalg import norm
+                import numpy as np
+
+                emb_normalized = emb / norm(emb)
+
+                if matcher.embeddings.size > 0:
+                    sims = matcher.embeddings @ emb_normalized
+                    print("\n[DEBUG] Similarity scores:")
+                    for sid, sim in zip(matcher.student_ids, sims):
+                        print(f"         {sid} → {sim:.4f}")
+                    print(f"         Best score : {float(np.max(sims)):.4f}")
+                    print(f"         Threshold  : 0.70")
+                    print()
+
+    
                 # Match
                 student_id, score = matcher.match(emb)
 

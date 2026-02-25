@@ -58,7 +58,7 @@ def register_single_embedding(frame, detector, landm, recognizer):
     if face_crop.size == 0:
         print("Bad crop.")
         return None
-
+    '''
     lm = landm.predict(face_crop)
     if lm is None:
         print("No landmarks detected.")
@@ -68,6 +68,8 @@ def register_single_embedding(frame, detector, landm, recognizer):
     if aligned is None:
         print("Alignment failed.")
         return None
+    '''
+    aligned = cv2.resize(face_crop, (112, 112))
 
     emb = recognizer.get_embedding(aligned)
     if emb is None:
