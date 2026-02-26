@@ -8,87 +8,246 @@ from datetime import datetime
 from app.services.supabase_client import supabase
 from app.config.config import (
     WEIGHTS_PATH, CONF, IOU, IMG_SIZE, DEVICE,
-    CAM_INDEX, SHOW_FPS, WINDOW_NAME,
     MOBILE_CAM_URL
 )
 from app.detection.face_detector import FaceDetector
 from app.landmarks.landmark_detector import LandmarkDetector
-from app.utils.alignment import align_face
 from app.recognition.face_recognizer import FaceRecognizer
 
 
 # ------------------------------------------------------------
-#   USER INPUT → USE UNIVERSITY ROLL NUMBER
+#   CONFIG
 # ------------------------------------------------------------
-UNIV_ROLL_NO = "12200222047"      # <-- CHANGE THIS
-NUM_EMBEDDINGS = 3
+UNIV_ROLL_NO   = "12200222047"    # <-- CHANGE THIS
+NUM_CAPTURES   = 6                # Press SPACE 6 times from different angles/positions
+USE_MOBILE_CAM = True
+
+
+# ------------------------------------------------------------
+#   AUGMENTATION PIPELINE
+#
+#   Categories covered:
+#     A. Original
+#     B. Distance simulation      (downscale → upscale)
+#     C. Blur / focus             (Gaussian blur)
+#     D. Lighting — bright/dark   (global brightness shift)
+#     E. Lighting — contrast      (CLAHE, gamma)
+#     F. Lighting — shadows       (gradient shadow overlay)
+#     G. Pose — in-plane rotation (warpAffine)
+#     H. Pose — horizontal flip
+#     I. Partial occlusion        (rectangular mask regions)
+#     J. Noise                    (Gaussian)
+#     K. Combined scenarios       (distance + lighting)
+#
+#   Total: 30 augmented versions per capture
+#   Total embeddings before mean: NUM_CAPTURES × 30 = 180
+#   Stored in DB: 1 mean embedding per student
+# ------------------------------------------------------------
+
+def _rotate(img: np.ndarray, angle: float) -> np.ndarray:
+    h, w = img.shape[:2]
+    M = cv2.getRotationMatrix2D((w // 2, h // 2), angle, 1.0)
+    return cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
+
+
+def _adjust_brightness(img: np.ndarray, delta: int) -> np.ndarray:
+    return np.clip(img.astype(np.int32) + delta, 0, 255).astype(np.uint8)
+
+
+def _adjust_gamma(img: np.ndarray, gamma: float) -> np.ndarray:
+    inv_gamma = 1.0 / gamma
+    table = np.array([((i / 255.0) ** inv_gamma) * 255
+                      for i in range(256)], dtype=np.uint8)
+    return cv2.LUT(img, table)
+
+
+def _add_noise(img: np.ndarray, std: float = 12.0) -> np.ndarray:
+    noise = np.random.normal(0, std, img.shape).astype(np.int32)
+    return np.clip(img.astype(np.int32) + noise, 0, 255).astype(np.uint8)
+
+
+def _downscale_upscale(img: np.ndarray, scale: float) -> np.ndarray:
+    """Simulate distance — compress then restore to 112x112."""
+    h, w = img.shape[:2]
+    sw = max(8, int(w * scale))
+    sh = max(8, int(h * scale))
+    small = cv2.resize(img, (sw, sh), interpolation=cv2.INTER_AREA)
+    return cv2.resize(small, (w, h), interpolation=cv2.INTER_CUBIC)
+
+
+def _add_shadow(img: np.ndarray, direction: str = "left") -> np.ndarray:
+    """Simulate partial lighting shadow from one side."""
+    h, w = img.shape[:2]
+    gradient = np.linspace(0.35, 1.0, w) if direction == "left" else np.linspace(1.0, 0.35, w)
+    gradient = gradient[np.newaxis, :, np.newaxis]
+    return np.clip(img.astype(np.float32) * gradient, 0, 255).astype(np.uint8)
+
+
+def _occlude(img: np.ndarray, region: str) -> np.ndarray:
+    """
+    Simulate partial face occlusion:
+      lower  → mask/scarf/desk blocking lower face
+      upper  → cap/hair blocking forehead
+      left   → person/object partially blocking left side
+      right  → person/object partially blocking right side
+    """
+    out = img.copy()
+    h, w = out.shape[:2]
+    if region == "lower":
+        out[h // 2:, :] = 128
+    elif region == "upper":
+        out[:h // 3, :] = 128
+    elif region == "left":
+        out[:, :w // 3] = 128
+    elif region == "right":
+        out[:, 2 * w // 3:] = 128
+    return out
+
+
+def _clahe(img: np.ndarray) -> np.ndarray:
+    """Contrast Limited Adaptive Histogram Equalization."""
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+    l = clahe.apply(l)
+    return cv2.cvtColor(cv2.merge([l, a, b]), cv2.COLOR_LAB2BGR)
+
+
+def augment_face(face_crop: np.ndarray) -> list:
+    """
+    Takes a clean 112x112 face crop.
+    Returns a list of ~30 augmented np.ndarray images.
+    """
+    f = face_crop
+    v = []
+
+    # A. Original
+    v.append(f.copy())                                                      # 1
+
+    # B. Distance simulation
+    v.append(_downscale_upscale(f, 0.5))                                    # 2  mild
+    v.append(_downscale_upscale(f, 0.25))                                   # 3  moderate
+    v.append(_downscale_upscale(f, 0.15))                                   # 4  far
+
+    # C. Blur
+    v.append(cv2.GaussianBlur(f, (3, 3), 0))                               # 5  mild
+    v.append(cv2.GaussianBlur(f, (5, 5), 0))                               # 6  medium
+    v.append(cv2.GaussianBlur(f, (7, 7), 0))                               # 7  heavy
+
+    # D. Brightness
+    v.append(_adjust_brightness(f, +50))                                    # 8  bright
+    v.append(_adjust_brightness(f, -50))                                    # 9  dark
+    v.append(_adjust_brightness(f, +90))                                    # 10 window glare
+    v.append(_adjust_brightness(f, -90))                                    # 11 back of room
+
+    # E. Gamma / contrast
+    v.append(_adjust_gamma(f, 1.8))                                         # 12 high gamma
+    v.append(_adjust_gamma(f, 0.55))                                        # 13 low gamma
+    v.append(_clahe(f))                                                     # 14 CLAHE
+
+    # F. Shadow
+    v.append(_add_shadow(f, "left"))                                        # 15
+    v.append(_add_shadow(f, "right"))                                       # 16
+
+    # G. In-plane rotation (head tilt)
+    v.append(_rotate(f,  10))                                               # 17
+    v.append(_rotate(f, -10))                                               # 18
+    v.append(_rotate(f,  20))                                               # 19
+    v.append(_rotate(f, -20))                                               # 20
+
+    # H. Horizontal flip (mild pose change)
+    v.append(cv2.flip(f, 1))                                                # 21
+
+    # I. Occlusion
+    v.append(_occlude(f, "lower"))                                          # 22 mask/scarf
+    v.append(_occlude(f, "upper"))                                          # 23 cap/hair
+    v.append(_occlude(f, "left"))                                           # 24
+    v.append(_occlude(f, "right"))                                          # 25
+
+    # J. Noise
+    v.append(_add_noise(f, std=10))                                         # 26
+    v.append(_add_noise(f, std=22))                                         # 27
+
+    # K. Combined scenarios
+    v.append(_adjust_brightness(_downscale_upscale(f, 0.5), +40))          # 28 far + bright
+    v.append(_adjust_brightness(_downscale_upscale(f, 0.5), -40))          # 29 far + dark
+    v.append(cv2.GaussianBlur(_downscale_upscale(f, 0.4), (3, 3), 0))     # 30 far + blur
+
+    return v  # 30 total
 
 
 # ------------------------------------------------------------
 #   HELPERS
 # ------------------------------------------------------------
 def get_student_uuid(univ_roll_no: str):
-    """Fetch student_id (UUID) by univ_roll_no."""
     res = (
         supabase.table("students")
         .select("student_id")
         .eq("univ_roll_no", univ_roll_no)
         .execute()
     )
-
     data = res.data
     if not data:
         print(f"❌ No student found with univ_roll_no = {univ_roll_no}")
         return None
-
     return data[0]["student_id"]
 
 
-def register_single_embedding(frame, detector, landm, recognizer):
-    """Detect → Landmark → Align → Embed"""
+def extract_face_crop(frame: np.ndarray, detector) -> np.ndarray | None:
+    """Detect face → clean 112x112 crop."""
     detections = detector.predict(frame)
     if not detections:
-        print("No face detected.")
+        print("  [!] No face detected.")
         return None
 
-    det = detections[0]  # first detected face
+    det = detections[0]
     x1, y1, x2, y2 = map(int, [det["x1"], det["y1"], det["x2"], det["y2"]])
 
-    face_crop = frame[y1:y2, x1:x2]
-    if face_crop.size == 0:
-        print("Bad crop.")
-        return None
-    '''
-    lm = landm.predict(face_crop)
-    if lm is None:
-        print("No landmarks detected.")
-        return None
+    pad = 10
+    x1 = max(0, x1 - pad)
+    y1 = max(0, y1 - pad)
+    x2 = min(frame.shape[1], x2 + pad)
+    y2 = min(frame.shape[0], y2 + pad)
 
-    aligned = align_face(face_crop, lm)
-    if aligned is None:
-        print("Alignment failed.")
-        return None
-    '''
-    aligned = cv2.resize(face_crop, (112, 112))
-
-    emb = recognizer.get_embedding(aligned)
-    if emb is None:
-        print("Embedding failed.")
+    crop = frame[y1:y2, x1:x2]
+    if crop.size == 0:
+        print("  [!] Bad crop.")
         return None
 
-    return emb.tolist()
+    return cv2.resize(crop, (112, 112), interpolation=cv2.INTER_CUBIC)
 
 
-def save_embedding_to_supabase(student_uuid, embedding):
+def compute_mean_embedding(all_embeddings: list) -> np.ndarray | None:
+    """
+    Average all embeddings then re-normalize.
+    Produces one robust vector covering all conditions.
+    """
+    stacked = np.array(all_embeddings, dtype=np.float32)   # (N, 512)
+    mean    = np.mean(stacked, axis=0)                      # (512,)
+    n       = np.linalg.norm(mean)
+    if n == 0:
+        return None
+    return (mean / n).astype(np.float32)
+
+
+def delete_existing_embeddings(student_uuid: str):
+    supabase.table("student_embeddings") \
+        .delete() \
+        .eq("student_id", student_uuid) \
+        .execute()
+    print("  ✔ Old embeddings deleted.")
+
+
+def save_mean_embedding(student_uuid: str, embedding: np.ndarray):
     row = {
         "embedding_id": str(uuid.uuid4()),
-        "student_id": student_uuid,
-        "embedding": embedding,
-        "created_at": datetime.utcnow().isoformat(),
+        "student_id":   student_uuid,
+        "embedding":    embedding.tolist(),
+        "augmentation": "mean",
+        "created_at":   datetime.utcnow().isoformat(),
     }
-
     supabase.table("student_embeddings").insert(row).execute()
-    print("✔ Saved embedding.")
+    print("  ✔ Mean embedding saved.")
 
 
 # ------------------------------------------------------------
@@ -96,63 +255,104 @@ def save_embedding_to_supabase(student_uuid, embedding):
 # ------------------------------------------------------------
 def main():
     print("\n=== Student Face Registration ===")
-    print("Using univ_roll_no:", UNIV_ROLL_NO)
+    print(f"  Roll No        : {UNIV_ROLL_NO}")
+    print(f"  Captures       : {NUM_CAPTURES}")
+    print(f"  Variants/frame : 30 augmentations")
+    print(f"  Total vectors  : {NUM_CAPTURES * 30} → averaged to 1 mean embedding\n")
 
     student_uuid = get_student_uuid(UNIV_ROLL_NO)
     if student_uuid is None:
-        print("Registration aborted.")
         return
+    print(f"  Student UUID   : {student_uuid}\n")
 
-    print("Resolved student_id:", student_uuid)
-
-    # Load modules
-    detector = FaceDetector(Path(WEIGHTS_PATH), device=DEVICE, conf=CONF, iou=IOU, img_size=IMG_SIZE)
-    
-    landm = LandmarkDetector()
+    detector   = FaceDetector(Path(WEIGHTS_PATH), device=DEVICE, conf=CONF, iou=IOU, img_size=IMG_SIZE)
+    landm      = LandmarkDetector()     # kept for future use
     recognizer = FaceRecognizer(device=DEVICE)
 
-    # --------------------------------------------------------
-    #   USE MOBILE CAMERA (same as main.py)
-    # --------------------------------------------------------
-    USE_MOBILE_CAMERA = True
+    src = MOBILE_CAM_URL if USE_MOBILE_CAM else 0
+    cap = cv2.VideoCapture(src)
+    if not cap.isOpened():
+        print("[!] Could not open camera.")
+        return
 
-    if USE_MOBILE_CAMERA:
-        print("\n[i] Using mobile camera stream:", MOBILE_CAM_URL)
-        cap = cv2.VideoCapture(MOBILE_CAM_URL)
-    else:
-        print("\n[i] Using default laptop webcam")
-        cap = cv2.VideoCapture(0)
+    print("  Capture guide — vary your pose each SPACE press:")
+    print("    1. Front facing, normal")
+    print("    2. Slight left turn")
+    print("    3. Slight right turn")
+    print("    4. Slight upward angle")
+    print("    5. Slight downward angle")
+    print("    6. Step back (simulate distance)\n")
+    print("  SPACE = capture  |  Q = quit\n")
 
-    collected = 0
+    all_embeddings = []
+    capture_count  = 0
 
-    print("\nPress SPACE to capture an embedding.")
-    print("Press Q to quit.\n")
-
-    while collected < NUM_EMBEDDINGS:
+    while capture_count < NUM_CAPTURES:
         ret, frame = cap.read()
         if not ret:
-            print("[!] Camera read failed.")
-            break
+            continue
 
         frame = cv2.flip(frame, 1)
+
+        remaining = NUM_CAPTURES - capture_count
+        cv2.putText(frame, f"Capture {capture_count + 1}/{NUM_CAPTURES}  —  SPACE to capture",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(frame, "Q to quit",
+                    (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (180, 180, 180), 1)
 
         cv2.imshow("Register Student", frame)
         key = cv2.waitKey(1) & 0xFF
 
         if key == ord("q"):
+            print("\n[!] Aborted by user.")
             break
 
         if key == ord(" "):
-            print(f"\nCapturing embedding {collected + 1}/{NUM_EMBEDDINGS}")
-            emb = register_single_embedding(frame, detector, landm, recognizer)
+            print(f"\n[→] Capture {capture_count + 1}/{NUM_CAPTURES}")
 
-            if emb:
-                save_embedding_to_supabase(student_uuid, emb)
-                collected += 1
+            face_crop = extract_face_crop(frame, detector)
+            if face_crop is None:
+                print("  [!] No face found — this capture won't count, try again.")
+                continue
+
+            variants = augment_face(face_crop)
+            print(f"  [→] {len(variants)} augmented variants generated")
+
+            valid = 0
+            for aug_img in variants:
+                emb = recognizer.get_embedding(aug_img)
+                if emb is not None:
+                    all_embeddings.append(emb)
+                    valid += 1
+
+            capture_count += 1
+            print(f"  [→] {valid}/{len(variants)} embeddings collected")
+            print(f"  [→] Running total: {len(all_embeddings)} embeddings")
 
     cap.release()
     cv2.destroyAllWindows()
-    print("\n✔ Registration Completed.\n")
+
+    if not all_embeddings:
+        print("\n[!] No embeddings collected. Registration failed.")
+        return
+
+    # Compute + save mean
+    print(f"\n[→] Computing mean embedding from {len(all_embeddings)} vectors...")
+    mean_emb = compute_mean_embedding(all_embeddings)
+    if mean_emb is None:
+        print("[!] Failed to compute mean embedding.")
+        return
+
+    print("[→] Removing old embeddings...")
+    delete_existing_embeddings(student_uuid)
+
+    print("[→] Saving mean embedding to Supabase...")
+    save_mean_embedding(student_uuid, mean_emb)
+
+    print(f"\n✔ Registration complete!")
+    print(f"  Captures used  : {capture_count}")
+    print(f"  Vectors merged : {len(all_embeddings)}")
+    print(f"  Stored         : 1 mean embedding\n")
 
 
 if __name__ == "__main__":

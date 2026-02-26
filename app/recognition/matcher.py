@@ -1,46 +1,32 @@
 import numpy as np
 import json
 from numpy.linalg import norm
+from collections import defaultdict
 from app.services.supabase_client import supabase
 
 
-THRESHOLD = 0.70
+THRESHOLD = 0.60  # Relaxed from 0.70 — distant/augmented embeddings score lower
 
 
 def _parse_embedding(raw):
-    """
-    Converts raw Supabase embedding into a Python float list.
-
-    Supabase may return:
-        - list[float]
-        - or string: "[-0.02, 0.11, ...]"
-    """
-
-    # Case 1: Already a list of floats
     if isinstance(raw, list):
         return raw
-
-    # Case 2: String representing a list
     if isinstance(raw, str):
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
             print("❌ ERROR: Cannot decode embedding string:", raw)
             return None
-
-    # Unsupported type
     print("❌ ERROR: Unsupported embedding format:", type(raw))
     return None
 
 
 def load_embeddings():
     """
-    Loads student embeddings from Supabase.
-    Ensures all embeddings are float32 and L2-normalized.
-
+    Loads all student embeddings from Supabase.
     Returns:
-        student_ids : list[str]
-        embeddings  : np.ndarray (N, 512)
+        student_ids : list[str]   — one entry per embedding row
+        embeddings  : np.ndarray  — shape (N, 512)
     """
     res = (
         supabase
@@ -52,14 +38,12 @@ def load_embeddings():
     data = res.data or []
 
     student_ids = []
-    embeddings = []
+    embeddings  = []
 
     for row in data:
         emb = _parse_embedding(row["embedding"])
         if emb is None:
             continue
-
-        # Ensure correct length
         if len(emb) != 512:
             print(f"❌ Skipping embedding with wrong dimension: {len(emb)}")
             continue
@@ -72,7 +56,7 @@ def load_embeddings():
 
     embeddings = np.array(embeddings, dtype=np.float32)
 
-    # Normalize
+    # L2 normalize all stored embeddings
     embeddings = embeddings / norm(embeddings, axis=1, keepdims=True)
 
     return student_ids, embeddings
@@ -81,28 +65,30 @@ def load_embeddings():
 class Matcher:
     """
     Matches ArcFace embeddings using cosine similarity.
+
+    Strategy:
+        - Each student has multiple embeddings (original + augmented variants)
+        - For a query embedding, compute similarity against ALL stored embeddings
+        - Group scores by student_id → take MAX score per student
+        - Pick the student with the highest max score
+        - Accept only if above THRESHOLD
     """
 
     def __init__(self):
         self.student_ids, self.embeddings = load_embeddings()
 
     def reload(self):
-        """Reload DB embeddings."""
         self.student_ids, self.embeddings = load_embeddings()
 
     def match(self, emb: np.ndarray):
         """
-        Given a 512-dim L2-normalized embedding,
-        returns (student_id, score) or (None, score).
+        Returns (student_id, score) or (None, score).
         """
-
         if emb is None or emb.shape[0] != 512:
             return None, 0.0
 
-        # Normalize input embedding
         emb = emb.astype(np.float32)
         emb_norm = norm(emb)
-
         if emb_norm == 0:
             return None, 0.0
 
@@ -111,13 +97,26 @@ class Matcher:
         if self.embeddings.size == 0:
             return None, 0.0
 
-        # Cosine similarity via dot product
+        # Cosine similarity — shape (N,)
         sims = self.embeddings @ emb
 
-        idx = int(np.argmax(sims))
-        score = float(sims[idx])
+        # Group by student_id → max score per student
+        student_best = defaultdict(float)
+        for sid, sim in zip(self.student_ids, sims):
+            if sim > student_best[sid]:
+                student_best[sid] = float(sim)
 
-        if score >= THRESHOLD:
-            return self.student_ids[idx], score
+        # Debug — print per-student best scores
+        print("\n[DEBUG] Per-student best scores:")
+        for sid, best in sorted(student_best.items(), key=lambda x: -x[1]):
+            print(f"         {sid} → {best:.4f}")
+        print(f"         Threshold : {THRESHOLD}")
 
-        return None, score
+        # Pick best student
+        best_student = max(student_best, key=student_best.get)
+        best_score   = student_best[best_student]
+
+        if best_score >= THRESHOLD:
+            return best_student, best_score
+
+        return None, best_score
