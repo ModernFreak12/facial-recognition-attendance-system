@@ -7,6 +7,7 @@ load_dotenv()  # Load values from .env
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
 
+
 def get_supabase() -> Client:
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
         raise RuntimeError("Supabase credentials are missing. Check your .env file.")

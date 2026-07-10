@@ -28,6 +28,7 @@ class FaceRecognizer:
             print(f"[MODEL] Input  — name: {inp.name}, shape: {inp.shape}, type: {inp.type}")
         for out in self.session.get_outputs():
             print(f"[MODEL] Output — name: {out.name}, shape: {out.shape}, type: {out.type}")
+
     # ---------------------------------------------------------
     # PREPROCESS → NHWC
     # ---------------------------------------------------------

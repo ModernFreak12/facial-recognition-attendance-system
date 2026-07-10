@@ -26,8 +26,7 @@ def draw_label(frame, bbox, label, color=(0, 255, 0)):
         frame, label,
         (x1 + 3, y1 - 5),
         cv2.FONT_HERSHEY_SIMPLEX,
-        0.6,
-        (0, 0, 0), 2
+        0.6, (0, 0, 0), 2
     )
 
     return frame
