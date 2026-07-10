@@ -63,9 +63,9 @@ DEVICE   = os.getenv("DEVICE", "cpu")      # "cpu" or "cuda"
 # -------------------------------------------------------------
 # CAMERA / WINDOW CONFIG
 # -------------------------------------------------------------
-CAM_INDEX   = int(os.getenv("CAM_INDEX", "0"))
-SHOW_FPS    = os.getenv("SHOW_FPS", "1") == "1"
-WINDOW_NAME = os.getenv("WINDOW_NAME", "Face Recognition Attendance System")
+CAM_INDEX      = int(os.getenv("CAM_INDEX", "0"))
+SHOW_FPS       = os.getenv("SHOW_FPS", "1") == "1"
+WINDOW_NAME    = os.getenv("WINDOW_NAME", "Face Recognition Attendance System")
 MOBILE_CAM_URL = os.getenv("MOBILE_CAM_URL", "http://192.168.1.4:8080/video")
 
 

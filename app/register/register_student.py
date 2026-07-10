@@ -20,7 +20,7 @@ from app.recognition.face_recognizer import FaceRecognizer
 # ------------------------------------------------------------
 UNIV_ROLL_NO   = "12200222047"    # <-- CHANGE THIS
 NUM_CAPTURES   = 6                # Press SPACE 6 times from different angles/positions
-USE_MOBILE_CAM = True
+USE_MOBILE_CAM = False
 
 
 # ------------------------------------------------------------
@@ -231,20 +231,22 @@ def compute_mean_embedding(all_embeddings: list) -> np.ndarray | None:
 
 
 def delete_existing_embeddings(student_uuid: str):
-    supabase.table("student_embeddings") \
-        .delete() \
-        .eq("student_id", student_uuid) \
+    (
+        supabase.table("student_embeddings")
+        .delete()
+        .eq("student_id", student_uuid)
         .execute()
+    )
     print("  ✔ Old embeddings deleted.")
 
 
 def save_mean_embedding(student_uuid: str, embedding: np.ndarray):
     row = {
         "embedding_id": str(uuid.uuid4()),
-        "student_id":   student_uuid,
-        "embedding":    embedding.tolist(),
+        "student_id": student_uuid,
+        "embedding": embedding.tolist(),
         "augmentation": "mean",
-        "created_at":   datetime.utcnow().isoformat(),
+        "created_at": datetime.utcnow().isoformat(),
     }
     supabase.table("student_embeddings").insert(row).execute()
     print("  ✔ Mean embedding saved.")

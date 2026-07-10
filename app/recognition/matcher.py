@@ -3,7 +3,7 @@ import json
 from numpy.linalg import norm
 from collections import defaultdict
 from app.services.supabase_client import supabase
-
+from app.database.course_queries import get_students_for_course
 
 THRESHOLD = 0.60  # Relaxed from 0.70 — distant/augmented embeddings score lower
 
@@ -21,42 +21,67 @@ def _parse_embedding(raw):
     return None
 
 
-def load_embeddings():
+def load_embeddings(course_id=None):
     """
-    Loads all student embeddings from Supabase.
-    Returns:
-        student_ids : list[str]   — one entry per embedding row
-        embeddings  : np.ndarray  — shape (N, 512)
-    """
-    res = (
-        supabase
-        .table("student_embeddings")
-        .select("student_id, embedding")
-        .execute()
-    )
+    Loads embeddings.
 
-    data = res.data or []
+    If course_id is given:
+        loads only enrolled students.
+
+    Otherwise:
+        loads all embeddings.
+    """
 
     student_ids = []
-    embeddings  = []
+    embeddings = []
 
-    for row in data:
-        emb = _parse_embedding(row["embedding"])
-        if emb is None:
-            continue
-        if len(emb) != 512:
-            print(f"❌ Skipping embedding with wrong dimension: {len(emb)}")
-            continue
+    # -----------------------------
+    # COURSE FILTERED MODE
+    # -----------------------------
+    if course_id:
+        students = get_students_for_course(course_id)
 
-        student_ids.append(row["student_id"])
-        embeddings.append(emb)
+        for student in students:
+            emb = _parse_embedding(student["embedding"])
+
+            if emb is None:
+                continue
+
+            if len(emb) != 512:
+                print("❌ Wrong embedding size")
+                continue
+
+            student_ids.append(student["student_id"])
+            embeddings.append(emb)
+
+    # -----------------------------
+    # LOAD EVERYTHING (fallback)
+    # -----------------------------
+    else:
+        res = (
+            supabase.table("student_embeddings")
+            .select("student_id, embedding")
+            .execute()
+        )
+
+        data = res.data or []
+
+        for row in data:
+            emb = _parse_embedding(row["embedding"])
+
+            if emb is None:
+                continue
+
+            if len(emb) != 512:
+                continue
+
+            student_ids.append(row["student_id"])
+            embeddings.append(emb)
 
     if not embeddings:
         return [], np.empty((0, 512), dtype=np.float32)
 
     embeddings = np.array(embeddings, dtype=np.float32)
-
-    # L2 normalize all stored embeddings
     embeddings = embeddings / norm(embeddings, axis=1, keepdims=True)
 
     return student_ids, embeddings
@@ -74,11 +99,12 @@ class Matcher:
         - Accept only if above THRESHOLD
     """
 
-    def __init__(self):
-        self.student_ids, self.embeddings = load_embeddings()
+    def __init__(self, course_id=None):
+        self.course_id = course_id
+        self.student_ids, self.embeddings = load_embeddings(course_id)
 
     def reload(self):
-        self.student_ids, self.embeddings = load_embeddings()
+        self.student_ids, self.embeddings = load_embeddings(self.course_id)
 
     def match(self, emb: np.ndarray):
         """
@@ -114,7 +140,7 @@ class Matcher:
 
         # Pick best student
         best_student = max(student_best, key=student_best.get)
-        best_score   = student_best[best_student]
+        best_score = student_best[best_student]
 
         if best_score >= THRESHOLD:
             return best_student, best_score
