@@ -54,7 +54,7 @@ def _auto_weights() -> Path:
 # Allow override via environment variable
 WEIGHTS_PATH = Path(os.getenv("WEIGHTS_PATH", _auto_weights()))
 
-CONF     = float(os.getenv("CONF", "0.6"))
+CONF     = float(os.getenv("CONF", "0.4"))
 IOU      = float(os.getenv("IOU", "0.5"))
 IMG_SIZE = int(os.getenv("IMG_SIZE", "2208"))
 DEVICE   = os.getenv("DEVICE", "cpu")      # "cpu" or "cuda"
@@ -72,7 +72,7 @@ MOBILE_CAM_URL = os.getenv("MOBILE_CAM_URL", "http://192.168.1.4:8080/video")
 # -------------------------------------------------------------
 # FACE RECOGNITION (ArcFace ONNX)
 # -------------------------------------------------------------
-FACE_RECOGNITION_MODEL = FR_DIR / "arc.onnx"
+FACE_RECOGNITION_MODEL = FR_DIR / "w600k_r50.onnx"
 
 
 # -------------------------------------------------------------

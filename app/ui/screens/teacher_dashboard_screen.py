@@ -2,24 +2,27 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.scrollview import ScrollView
-from kivy.uix.spinner import Spinner
 from kivy.uix.label import Label
-from kivy.uix.button import Button
-from kivy.uix.textinput import TextInput
 from kivy.uix.widget import Widget
-from kivy.graphics import Color, RoundedRectangle, Rectangle, Line
+from kivy.graphics import Color, Rectangle
+from datetime import date, timedelta
 
 from app.ui.state.session import SessionState
-from app.database.teacher_queries import get_teacher_courses, get_course_attendance
+from app.database.teacher_queries import (
+    get_teacher_courses, get_course_calendar_data, get_course_history_table
+)
 from app.services.class_runner import run_class
 from app.services.report_generator import export_weekly_report, export_monthly_report
+from app.ui.widgets.buttons import RoundedButton, OutlineButton, GhostButton, Card
+from app.ui.widgets.controls import styled_spinner, SegmentedToggle
+from app.ui.widgets.calendar_view import AttendanceCalendar
 from app.ui.theme import (
-    BG_DARK, BG_CARD, BG_INPUT, PRIMARY, PRIMARY_LIGHT,
-    ACCENT_GREEN, ACCENT_RED, SECONDARY,
-    TEXT_WHITE, TEXT_MUTED, TEXT_DARK,
-    FONT_SIZE_TITLE, FONT_SIZE_SUBTITLE, FONT_SIZE_BODY,
-    FONT_SIZE_BUTTON, FONT_SIZE_SMALL
+    BG_DARK, PRIMARY, ACCENT_GREEN, ACCENT_RED,
+    TEXT_WHITE, TEXT_MUTED,
+    FONT_SIZE_TITLE, FONT_SIZE_SMALL
 )
+
+NO_SUBJECT = "Select Subject"
 
 
 class TeacherDashboardScreen(Screen):
@@ -30,13 +33,11 @@ class TeacherDashboardScreen(Screen):
         self.selected_course = None
 
         root = FloatLayout()
-
         with root.canvas.before:
             Color(*BG_DARK)
             self._bg_rect = Rectangle(size=root.size, pos=root.pos)
         root.bind(size=self._update_bg, pos=self._update_bg)
 
-        # ── Main scrollable column ──
         scroll = ScrollView(
             size_hint=(0.92, 0.92),
             pos_hint={"center_x": 0.5, "center_y": 0.5},
@@ -44,173 +45,78 @@ class TeacherDashboardScreen(Screen):
         )
 
         self.layout = BoxLayout(
-            orientation="vertical",
-            spacing=14,
-            padding=[24, 24, 24, 24],
-            size_hint_y=None
+            orientation="vertical", spacing=14,
+            padding=[24, 24, 24, 24], size_hint_y=None
         )
-        self.layout.bind(minimum_height=self.layout.setter('height'))
+        self.layout.bind(minimum_height=self.layout.setter("height"))
 
         # ── Header Card ──
-        header_card = BoxLayout(
-            orientation="vertical",
-            spacing=6,
-            padding=[20, 16, 20, 16],
-            size_hint_y=None,
-            height=100
+        header_card = Card(
+            orientation="vertical", spacing=6,
+            padding=[20, 16, 20, 16], size_hint_y=None, height=100
         )
-        with header_card.canvas.before:
-            Color(*BG_CARD)
-            header_card._bg = RoundedRectangle(
-                size=header_card.size, pos=header_card.pos, radius=[16]
-            )
-        header_card.bind(
-            size=lambda w, v: setattr(w._bg, 'size', v),
-            pos=lambda w, v: setattr(w._bg, 'pos', v)
-        )
-
-        self.info_label = Label(
-            text="",
-            font_size=FONT_SIZE_TITLE,
-            bold=True,
-            color=TEXT_WHITE,
-            size_hint_y=None,
-            height=36,
-            halign="left",
-            valign="middle"
-        )
-        self.info_label.bind(size=self.info_label.setter('text_size'))
-
-        role_tag = Label(
-            text="👨‍🏫  Teacher Dashboard",
-            font_size=FONT_SIZE_SMALL,
-            color=PRIMARY_LIGHT,
-            size_hint_y=None,
-            height=22,
-            halign="left",
-            valign="middle"
-        )
-        role_tag.bind(size=role_tag.setter('text_size'))
-
+        role_tag = self._label("👨‍🏫  Teacher Dashboard", PRIMARY, FONT_SIZE_SMALL, 22)
+        self.info_label = self._label("", TEXT_WHITE, FONT_SIZE_TITLE, 36, bold=True)
         header_card.add_widget(role_tag)
         header_card.add_widget(self.info_label)
 
-        # ── Course Selector ──
-        self.course_spinner = Spinner(
-            text="Select Course",
-            font_size=FONT_SIZE_BODY,
-            size_hint_y=None,
-            height=48,
-            background_normal="",
-            background_color=BG_INPUT,
-            color=TEXT_WHITE
-        )
+        # ── Subject selector (defaults to none selected) ──
+        self.course_spinner = styled_spinner(PRIMARY, text=NO_SUBJECT)
         self.course_spinner.bind(text=self.select_course)
 
         # Start class
-        start_btn = Button(
-            text="▶  Start Class",
-            font_size=FONT_SIZE_BUTTON,
-            size_hint_y=None,
-            height=50,
-            background_normal="",
-            background_color=[0, 0, 0, 0],
-            color=TEXT_WHITE,
-            bold=True
+        start_btn = RoundedButton(
+            fill_color=ACCENT_GREEN, text="▶  Start Class",
+            size_hint_y=None, height=50
         )
         start_btn.bind(on_press=self.start_class)
-        self._apply_rounded_bg(start_btn, ACCENT_GREEN, radius=14)
 
-        # ── Attendance date ──
-        date_label = Label(
-            text="View Attendance by Date",
-            font_size=FONT_SIZE_SMALL,
-            color=TEXT_MUTED,
-            size_hint_y=None,
-            height=24,
-            halign="left",
-            valign="middle"
-        )
-        date_label.bind(size=date_label.setter('text_size'))
-
-        self.date_input = TextInput(
-            hint_text="YYYY-MM-DD",
-            multiline=False,
-            size_hint_y=None,
-            height=44,
-            font_size=FONT_SIZE_BODY,
-            background_color=BG_INPUT,
-            foreground_color=TEXT_WHITE,
-            hint_text_color=TEXT_MUTED,
-            cursor_color=PRIMARY,
-            padding=[16, 12, 16, 12]
+        # ── View toggle ──
+        self.toggle = SegmentedToggle(
+            ["Calendar", "Table"], accent_color=PRIMARY, on_select=self._on_view_change
         )
 
-        attendance_btn = Button(
-            text="📋  View Attendance",
-            font_size=FONT_SIZE_BUTTON,
-            size_hint_y=None,
-            height=50,
-            background_normal="",
-            background_color=[0, 0, 0, 0],
-            color=TEXT_WHITE,
-            bold=True
-        )
-        attendance_btn.bind(on_press=self.view_attendance)
-        self._apply_rounded_bg(attendance_btn, PRIMARY, radius=14)
+        # ── Calendar view ──
+        self.calendar = AttendanceCalendar(accent_color=PRIMARY)
 
-        # ── Results Card ──
-        results_card = BoxLayout(
-            orientation="vertical",
-            padding=[16, 12, 16, 12],
-            size_hint_y=None,
-            height=220
+        # ── Table view card ──
+        table_card = Card(
+            orientation="vertical", padding=[16, 12, 16, 12], size_hint_y=None, height=260
         )
-        with results_card.canvas.before:
-            Color(*BG_CARD)
-            results_card._bg = RoundedRectangle(
-                size=results_card.size, pos=results_card.pos, radius=[14]
-            )
-        results_card.bind(
-            size=lambda w, v: setattr(w._bg, 'size', v),
-            pos=lambda w, v: setattr(w._bg, 'pos', v)
-        )
-
         self.result_label = Label(
-            text="",
-            font_size=FONT_SIZE_SMALL,
-            color=TEXT_MUTED,
-            halign="left",
-            valign="top",
-            markup=True
+            text="", font_size=FONT_SIZE_SMALL, color=TEXT_MUTED,
+            halign="left", valign="top", markup=True
         )
-        self.result_label.bind(size=self.result_label.setter('text_size'))
-        results_card.add_widget(self.result_label)
+        self.result_label.bind(size=self.result_label.setter("text_size"))
+        table_card.add_widget(self.result_label)
+        self.table_card = table_card
+        self.table_card.opacity = 0
+        self.table_card.height = 0
+        self.table_card.disabled = True
 
-        # ── Logout ──
-        logout_btn = Button(
-            text="Logout",
-            font_size=FONT_SIZE_SMALL,
-            size_hint_y=None,
-            height=42,
-            background_normal="",
-            background_color=[0, 0, 0, 0],
-            color=ACCENT_RED,
-            bold=False
-        )
+        # ── Report generation ──
+        report_row = BoxLayout(size_hint_y=None, height=48, spacing=10)
+        weekly_btn = OutlineButton(outline_color=PRIMARY, text="📄 Weekly Report")
+        weekly_btn.bind(on_press=self.export_weekly)
+        monthly_btn = OutlineButton(outline_color=PRIMARY, text="📄 Monthly Report")
+        monthly_btn.bind(on_press=self.export_monthly)
+        report_row.add_widget(weekly_btn)
+        report_row.add_widget(monthly_btn)
+
+        self.report_status = self._label("", TEXT_MUTED, FONT_SIZE_SMALL, 20, markup=True)
+
+        logout_btn = GhostButton(text="Logout", color=ACCENT_RED, size_hint_y=None, height=42)
         logout_btn.bind(on_press=self.logout)
 
-        # ── Assemble layout ──
         self.layout.add_widget(header_card)
-        self.layout.add_widget(Widget(size_hint_y=None, height=8))
+        self.layout.add_widget(Widget(size_hint_y=None, height=4))
         self.layout.add_widget(self.course_spinner)
         self.layout.add_widget(start_btn)
-        self.layout.add_widget(Widget(size_hint_y=None, height=10))
-        self.layout.add_widget(date_label)
-        self.layout.add_widget(self.date_input)
-        self.layout.add_widget(attendance_btn)
-        self.layout.add_widget(Widget(size_hint_y=None, height=6))
-        self.layout.add_widget(results_card)
+        self.layout.add_widget(self.toggle)
+        self.layout.add_widget(self.calendar)
+        self.layout.add_widget(self.table_card)
+        self.layout.add_widget(report_row)
+        self.layout.add_widget(self.report_status)
         self.layout.add_widget(Widget(size_hint_y=None, height=6))
         self.layout.add_widget(logout_btn)
 
@@ -218,71 +124,118 @@ class TeacherDashboardScreen(Screen):
         root.add_widget(scroll)
         self.add_widget(root)
 
+        self._show_empty_state()
+
+    @staticmethod
+    def _label(text, color, font_size, height, bold=False, markup=False):
+        lbl = Label(
+            text=text, font_size=font_size, color=color, bold=bold, markup=markup,
+            size_hint_y=None, height=height, halign="left", valign="middle"
+        )
+        lbl.bind(size=lbl.setter("text_size"))
+        return lbl
+
     def on_enter(self):
         teacher = SessionState.teacher
-
         self.info_label.text = f"{teacher['name']}"
 
-        courses = get_teacher_courses(teacher["teacher_id"])
-        self.courses = courses
-
-        self.course_spinner.values = [
-            row["courses"]["course_name"]
-            for row in courses
-        ]
+        self.courses = get_teacher_courses(teacher["teacher_id"])
+        self.course_spinner.values = [row["courses"]["course_name"] for row in self.courses]
+        self.course_spinner.text = NO_SUBJECT
+        self.selected_course = None
+        self._show_empty_state()
 
     def select_course(self, spinner, text):
+        if text == NO_SUBJECT:
+            self.selected_course = None
+            self._show_empty_state()
+            return
+
         for row in self.courses:
             course = row["courses"]
             if course["course_name"] == text:
-                self.selected_course = row
+                self.selected_course = {
+                    "course_id": row["course_id"],
+                    "course_name": course["course_name"],
+                    "course_code": course.get("course_code"),
+                    "semester": course.get("semester"),
+                }
                 break
+
+        self._refresh_data()
+
+    def _refresh_data(self):
+        if not self.selected_course:
+            return
+
+        course_id = self.selected_course["course_id"]
+
+        calendar_data = get_course_calendar_data(course_id)
+        self.calendar.set_data(calendar_data)
+
+        rows = get_course_history_table(course_id)
+        output = [f"[b]{self.selected_course['course_name']}[/b]\n"]
+        for row in rows:
+            pct = round((row["present"] + row["late"]) / row["total"] * 100) if row["total"] else 0
+            color = "[color=00E676]" if pct >= 75 else ("[color=FFAB40]" if pct >= 50 else "[color=FF5252]")
+            output.append(f"  {row['class_date']}  —  {color}{pct}%[/color]  ({row['present']}P / {row['late']}L / {row['absent']}A)")
+        self.result_label.text = "\n".join(output)
+
+    def _show_empty_state(self):
+        self.calendar.set_data({})
+        self.result_label.text = "[color=8888AA]Select a subject to view attendance.[/color]"
+        self.report_status.text = ""
+
+    def _on_view_change(self, name):
+        show_calendar = (name == "Calendar")
+        self.calendar.opacity = 1 if show_calendar else 0
+        self.calendar.disabled = not show_calendar
+        self.calendar.height = self.calendar.height if show_calendar else 0
+        self.table_card.opacity = 0 if show_calendar else 1
+        self.table_card.disabled = show_calendar
+        self.table_card.height = 0 if show_calendar else 260
 
     def start_class(self, instance):
         if not self.selected_course:
+            self.report_status.text = "[color=FF5252]Select a subject first.[/color]"
             return
-
         run_class(self.selected_course["course_id"])
 
-    def view_attendance(self, instance):
+    def export_weekly(self, instance):
         if not self.selected_course:
+            self.report_status.text = "[color=FF5252]Select a subject first.[/color]"
             return
 
-        rows = get_course_attendance(
-            self.selected_course["course_id"],
-            self.date_input.text
+        end = date.today()
+        start = end - timedelta(days=7)
+        path = export_weekly_report(
+            self.selected_course["course_id"], start.isoformat(), end.isoformat()
         )
 
-        output = []
-        for row in rows:
-            student = row["students"]
-            status = row["status"]
-            color = "[color=00E676]" if status == "PRESENT" else (
-                "[color=FFAB40]" if status == "LATE" else "[color=FF5252]"
-            )
-            output.append(
-                f"{student['name']} ({student['univ_roll_no']}) — {color}{status}[/color]"
-            )
+        if path:
+            self.report_status.text = f"[color=00E676]Saved weekly report to {path}[/color]"
+        else:
+            self.report_status.text = "[color=FFAB40]No sessions found in the last 7 days.[/color]"
 
-        self.result_label.text = "\n".join(output) if output else "[color=8888AA]No records found.[/color]"
+    def export_monthly(self, instance):
+        if not self.selected_course:
+            self.report_status.text = "[color=FF5252]Select a subject first.[/color]"
+            return
+
+        today = date.today()
+        path = export_monthly_report(
+            self.selected_course["course_id"], today.month, today.year
+        )
+
+        if path:
+            self.report_status.text = f"[color=00E676]Saved monthly report to {path}[/color]"
+        else:
+            self.report_status.text = "[color=FFAB40]No sessions found this month.[/color]"
 
     def logout(self, instance):
         SessionState.teacher = None
         self.manager.current = "home"
 
-    # ── Canvas helpers ──
     def _update_bg(self, *args):
         self._bg_rect.size = self.children[0].size
         self._bg_rect.pos = self.children[0].pos
-
-    def _apply_rounded_bg(self, btn, color, radius=12):
-        btn.background_color = [0, 0, 0, 0]
-        with btn.canvas.before:
-            Color(*color)
-            btn._rounded_bg = RoundedRectangle(
-                size=btn.size, pos=btn.pos, radius=[radius]
-            )
-        btn.bind(
-            size=lambda w, v: setattr(w._rounded_bg, 'size', v),
-            pos=lambda w, v: setattr(w._rounded_bg, 'pos', v)
-        )

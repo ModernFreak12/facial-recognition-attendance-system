@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from app.services.supabase_client import supabase
 
 
@@ -26,7 +27,7 @@ def end_class(class_id):
 
     (
         supabase.table("class_sessions")
-        .update({"ended_at": "now()"})
+        .update({"ended_at": datetime.now(timezone.utc).isoformat()})
         .eq("class_id", class_id)
         .execute()
     )

@@ -7,10 +7,13 @@ LATE_THRESHOLD_MINUTES = 15
 
 def mark_attendance(class_id, student_id, class_start_time):
     """
-    Insert attendance once only.
+    Insert attendance once; on repeat detections in the same
+    session, just refresh last_seen instead of dropping the update.
     """
 
-    # Prevent duplicate attendance
+    now = datetime.now(timezone.utc)
+
+    # Prevent duplicate attendance rows, but keep last_seen fresh
     existing = (
         supabase.table("attendance")
         .select("*")
@@ -20,9 +23,14 @@ def mark_attendance(class_id, student_id, class_start_time):
     )
 
     if existing.data:
+        (
+            supabase.table("attendance")
+            .update({"last_seen": now.isoformat()})
+            .eq("class_id", class_id)
+            .eq("student_id", student_id)
+            .execute()
+        )
         return
-
-    now = datetime.now(timezone.utc)
 
     minutes_elapsed = (now - class_start_time).total_seconds() / 60
 

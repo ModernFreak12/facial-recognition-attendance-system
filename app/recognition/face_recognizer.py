@@ -34,18 +34,25 @@ class FaceRecognizer:
     # ---------------------------------------------------------
     def preprocess(self, aligned_bgr: np.ndarray) -> np.ndarray:
         """
-        Prepares aligned face for ArcFace ONNX (NHWC).
+        Prepares aligned face for InsightFace ArcFace (NCHW).
         """
 
-        # BGR → RGB
+        # BGR -> RGB
         img = cv2.cvtColor(aligned_bgr, cv2.COLOR_BGR2RGB)
 
-        # float32 normalization
-        img = img.astype(np.float32)
-        img = (img - 127.5) / 128.0
+        # Safety (your aligner already outputs 112x112)
+        img = cv2.resize(img, (112, 112))
 
-        # model expects NHWC, so keep shape (112,112,3)
-        img = np.expand_dims(img, axis=0)  # (1,112,112,3)
+        img = img.astype(np.float32)
+
+        # ArcFace normalization
+        img = (img - 127.5) / 127.5
+
+        # NHWC -> NCHW
+        img = np.transpose(img, (2, 0, 1))
+
+        # Batch dimension
+        img = np.expand_dims(img, axis=0)
 
         return img
 

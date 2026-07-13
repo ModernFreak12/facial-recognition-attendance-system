@@ -82,3 +82,18 @@ def get_course_history(student_id, course_id):
     )
 
     return response.data or []
+
+
+def get_course_calendar_data(student_id, course_id):
+    """
+    Attendance history reshaped for the calendar widget:
+    {"YYYY-MM-DD": "PRESENT" | "LATE" | "ABSENT"}
+    """
+
+    history = get_course_history(student_id, course_id)
+
+    return {
+        row["class_sessions"]["class_date"]: row["status"]
+        for row in history
+        if row.get("class_sessions", {}).get("class_date")
+    }

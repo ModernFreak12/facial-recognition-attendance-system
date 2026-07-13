@@ -19,7 +19,7 @@ from app.recognition.face_recognizer import FaceRecognizer
 #   CONFIG
 # ------------------------------------------------------------
 UNIV_ROLL_NO   = "12200222047"    # <-- CHANGE THIS
-NUM_CAPTURES   = 6                # Press SPACE 6 times from different angles/positions
+NUM_CAPTURES   = 1                # Press SPACE 6 times from different angles/positions
 USE_MOBILE_CAM = False
 
 
@@ -276,14 +276,6 @@ def main():
     if not cap.isOpened():
         print("[!] Could not open camera.")
         return
-
-    print("  Capture guide — vary your pose each SPACE press:")
-    print("    1. Front facing, normal")
-    print("    2. Slight left turn")
-    print("    3. Slight right turn")
-    print("    4. Slight upward angle")
-    print("    5. Slight downward angle")
-    print("    6. Step back (simulate distance)\n")
     print("  SPACE = capture  |  Q = quit\n")
 
     all_embeddings = []
