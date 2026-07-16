@@ -11,7 +11,6 @@ from app.config.config import (
     MOBILE_CAM_URL
 )
 from app.detection.face_detector import FaceDetector
-from app.landmarks.landmark_detector import LandmarkDetector
 from app.recognition.face_recognizer import FaceRecognizer
 
 
@@ -20,7 +19,7 @@ from app.recognition.face_recognizer import FaceRecognizer
 # ------------------------------------------------------------
 UNIV_ROLL_NO   = "12200222047"    # <-- CHANGE THIS
 NUM_CAPTURES   = 1                # Press SPACE 6 times from different angles/positions
-USE_MOBILE_CAM = False
+USE_MOBILE_CAM = True
 
 
 # ------------------------------------------------------------
@@ -142,7 +141,7 @@ def augment_face(face_crop: np.ndarray) -> list:
 
     # E. Gamma / contrast
     v.append(_adjust_gamma(f, 1.8))                                         # 12 high gamma
-    v.append(_adjust_gamma(f, 0.55))                                        # 13 low gamma
+    v.append(_adjust_gamma(f, 0.55))                                            # 13 low gamma
     v.append(_clahe(f))                                                     # 14 CLAHE
 
     # F. Shadow
@@ -268,7 +267,6 @@ def main():
     print(f"  Student UUID   : {student_uuid}\n")
 
     detector   = FaceDetector(Path(WEIGHTS_PATH), device=DEVICE, conf=CONF, iou=IOU, img_size=IMG_SIZE)
-    landm      = LandmarkDetector()     # kept for future use
     recognizer = FaceRecognizer(device=DEVICE)
 
     src = MOBILE_CAM_URL if USE_MOBILE_CAM else 0

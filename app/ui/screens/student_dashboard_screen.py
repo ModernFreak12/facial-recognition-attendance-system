@@ -16,7 +16,7 @@ from app.ui.widgets.calendar_view import AttendanceCalendar
 from app.ui.theme import (
     BG_DARK, SECONDARY, ACCENT_RED,
     TEXT_WHITE, TEXT_MUTED,
-    FONT_SIZE_TITLE, FONT_SIZE_SUBTITLE, FONT_SIZE_SMALL,
+    FONT_SIZE_TITLE, FONT_SIZE_SMALL,
     status_markup
 )
 from datetime import date
@@ -54,7 +54,7 @@ class StudentDashboardScreen(Screen):
             orientation="vertical", spacing=6,
             padding=[20, 16, 20, 16], size_hint_y=None, height=100
         )
-        role_tag = self._label("🎒  Student Dashboard", SECONDARY, FONT_SIZE_SMALL, 22)
+        role_tag = self._label("Student Dashboard", SECONDARY, FONT_SIZE_SMALL, 22)
         self.info_label = self._label("", TEXT_WHITE, FONT_SIZE_TITLE, 36, bold=True)
         header_card.add_widget(role_tag)
         header_card.add_widget(self.info_label)
@@ -135,6 +135,10 @@ class StudentDashboardScreen(Screen):
         self.course_spinner.values = [c["course_name"] for c in self.courses]
         self.course_spinner.text = NO_SUBJECT
         self.selected_course = None
+        self.toggle.select("Calendar", fire_callback=False)
+        self.view_container.clear_widgets()
+        self.view_container.height = self.calendar.height
+        self.view_container.add_widget(self.calendar)
         self._show_empty_state()
 
     def select_course(self, spinner, text):

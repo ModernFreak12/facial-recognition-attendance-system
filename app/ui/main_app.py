@@ -37,7 +37,3 @@ class SmartClassroomApp(App):
         sm.add_widget(StudentDashboardScreen(name="student_dashboard"))
 
         return sm
-
-
-if __name__ == "__main__":
-    SmartClassroomApp().run()

@@ -2,6 +2,7 @@ from kivy.uix.screenmanager import Screen
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.gridlayout import GridLayout
 from kivy.uix.label import Label
 from kivy.uix.widget import Widget
 from kivy.graphics import Color, Rectangle
@@ -9,13 +10,14 @@ from datetime import date, timedelta
 
 from app.ui.state.session import SessionState
 from app.database.teacher_queries import (
-    get_teacher_courses, get_course_calendar_data, get_course_history_table
+    get_teacher_courses, get_course_attendance_matrix
 )
 from app.services.class_runner import run_class
-from app.services.report_generator import export_weekly_report, export_monthly_report
+from app.services.report_generator import (
+    export_weekly_report, export_monthly_report, export_total_report
+)
 from app.ui.widgets.buttons import RoundedButton, OutlineButton, GhostButton, Card
-from app.ui.widgets.controls import styled_spinner, SegmentedToggle
-from app.ui.widgets.calendar_view import AttendanceCalendar
+from app.ui.widgets.controls import styled_spinner
 from app.ui.theme import (
     BG_DARK, PRIMARY, ACCENT_GREEN, ACCENT_RED,
     TEXT_WHITE, TEXT_MUTED,
@@ -23,6 +25,23 @@ from app.ui.theme import (
 )
 
 NO_SUBJECT = "Select Subject"
+
+# Table layout constants
+ROW_HEIGHT = 42
+NAME_COL_WIDTH = 170
+ROLL_COL_WIDTH = 140
+DATE_COL_WIDTH = 96
+
+STATUS_COLORS = {
+    "PRESENT": "00E676",
+    "LATE": "FFAB40",
+    "ABSENT": "FF5252",
+}
+STATUS_SHORT = {
+    "PRESENT": "P",
+    "LATE": "L",
+    "ABSENT": "A",
+}
 
 
 class TeacherDashboardScreen(Screen):
@@ -71,28 +90,36 @@ class TeacherDashboardScreen(Screen):
         )
         start_btn.bind(on_press=self.start_class)
 
-        # ── View toggle ──
-        self.toggle = SegmentedToggle(
-            ["Calendar", "Table"], accent_color=PRIMARY, on_select=self._on_view_change
+        # ── Attendance table (student × date, horizontally scrollable) ──
+        self.table_card = Card(
+            orientation="vertical",
+            padding=[12, 12, 12, 12],
+            size_hint_y=None,
+            height=ROW_HEIGHT * 2
         )
 
-        # ── Calendar view ──
-        self.calendar = AttendanceCalendar(accent_color=PRIMARY)
+        self.table_grid = GridLayout(
+            cols=2, rows=1,
+            size_hint=(None, None),
+            row_default_height=ROW_HEIGHT,
+            row_force_default=True,
+            spacing=1
+        )
 
-        # ── Table view card ──
-        table_card = Card(
-            orientation="vertical", padding=[16, 12, 16, 12], size_hint_y=None, height=260
+        self.table_scroll = ScrollView(
+            size_hint=(1, None),
+            height=ROW_HEIGHT,
+            do_scroll_x=True,
+            do_scroll_y=False,
+            bar_width=6
         )
-        self.result_label = Label(
-            text="", font_size=FONT_SIZE_SMALL, color=TEXT_MUTED,
-            halign="left", valign="top", markup=True
+        self.table_scroll.add_widget(self.table_grid)
+        self.table_card.add_widget(self.table_scroll)
+
+        self.empty_label = self._label(
+            "Select a subject to view attendance.", TEXT_MUTED, FONT_SIZE_SMALL, 24, markup=True
         )
-        self.result_label.bind(size=self.result_label.setter("text_size"))
-        table_card.add_widget(self.result_label)
-        self.table_card = table_card
-        self.table_card.opacity = 0
-        self.table_card.height = 0
-        self.table_card.disabled = True
+        self.table_card.add_widget(self.empty_label)
 
         # ── Report generation ──
         report_row = BoxLayout(size_hint_y=None, height=48, spacing=10)
@@ -100,8 +127,11 @@ class TeacherDashboardScreen(Screen):
         weekly_btn.bind(on_press=self.export_weekly)
         monthly_btn = OutlineButton(outline_color=PRIMARY, text="📄 Monthly Report")
         monthly_btn.bind(on_press=self.export_monthly)
+        total_btn = OutlineButton(outline_color=PRIMARY, text="📄 Total Course Report")
+        total_btn.bind(on_press=self.export_total)
         report_row.add_widget(weekly_btn)
         report_row.add_widget(monthly_btn)
+        report_row.add_widget(total_btn)
 
         self.report_status = self._label("", TEXT_MUTED, FONT_SIZE_SMALL, 20, markup=True)
 
@@ -112,8 +142,6 @@ class TeacherDashboardScreen(Screen):
         self.layout.add_widget(Widget(size_hint_y=None, height=4))
         self.layout.add_widget(self.course_spinner)
         self.layout.add_widget(start_btn)
-        self.layout.add_widget(self.toggle)
-        self.layout.add_widget(self.calendar)
         self.layout.add_widget(self.table_card)
         self.layout.add_widget(report_row)
         self.layout.add_widget(self.report_status)
@@ -131,6 +159,16 @@ class TeacherDashboardScreen(Screen):
         lbl = Label(
             text=text, font_size=font_size, color=color, bold=bold, markup=markup,
             size_hint_y=None, height=height, halign="left", valign="middle"
+        )
+        lbl.bind(size=lbl.setter("text_size"))
+        return lbl
+
+    @staticmethod
+    def _cell_label(text, width, color=TEXT_WHITE, bold=False, markup=False):
+        lbl = Label(
+            text=text, font_size=FONT_SIZE_SMALL, color=color, bold=bold, markup=markup,
+            size_hint=(None, None), size=(width, ROW_HEIGHT),
+            halign="center", valign="middle"
         )
         lbl.bind(size=lbl.setter("text_size"))
         return lbl
@@ -169,31 +207,83 @@ class TeacherDashboardScreen(Screen):
             return
 
         course_id = self.selected_course["course_id"]
+        matrix = get_course_attendance_matrix(course_id)
+        self._build_table(matrix)
 
-        calendar_data = get_course_calendar_data(course_id)
-        self.calendar.set_data(calendar_data)
+    def _build_table(self, matrix):
+        dates = matrix.get("dates", [])
+        students = matrix.get("students", [])
 
-        rows = get_course_history_table(course_id)
-        output = [f"[b]{self.selected_course['course_name']}[/b]\n"]
-        for row in rows:
-            pct = round((row["present"] + row["late"]) / row["total"] * 100) if row["total"] else 0
-            color = "[color=00E676]" if pct >= 75 else ("[color=FFAB40]" if pct >= 50 else "[color=FF5252]")
-            output.append(f"  {row['class_date']}  —  {color}{pct}%[/color]  ({row['present']}P / {row['late']}L / {row['absent']}A)")
-        self.result_label.text = "\n".join(output)
+        self.table_grid.clear_widgets()
+
+        if not students or not dates:
+            self.table_scroll.height = 0
+            self.table_card.height = ROW_HEIGHT
+            self.empty_label.text = "[color=8888AA]No attendance records for this subject yet.[/color]"
+            self.empty_label.opacity = 1
+            self.empty_label.disabled = False
+            return
+
+        self.empty_label.text = ""
+        self.empty_label.opacity = 0
+        self.empty_label.disabled = True
+
+        n_cols = 2 + len(dates)
+        n_rows = 1 + len(students)
+
+        self.table_grid.cols = n_cols
+        self.table_grid.rows = n_rows
+
+        total_width = NAME_COL_WIDTH + ROLL_COL_WIDTH + DATE_COL_WIDTH * len(dates)
+        total_height = ROW_HEIGHT * n_rows
+
+        self.table_grid.width = total_width
+        self.table_grid.height = total_height
+        self.table_scroll.height = total_height
+        self.table_card.height = total_height + 24  # padding allowance
+
+        # ── Header row ──
+        self.table_grid.add_widget(
+            self._cell_label("Student", NAME_COL_WIDTH, color=PRIMARY, bold=True)
+        )
+        self.table_grid.add_widget(
+            self._cell_label("Roll No", ROLL_COL_WIDTH, color=PRIMARY, bold=True)
+        )
+        for d in dates:
+            label_text = d.strftime("%d %b") if hasattr(d, "strftime") else str(d)
+            self.table_grid.add_widget(
+                self._cell_label(label_text, DATE_COL_WIDTH, color=PRIMARY, bold=True)
+            )
+
+        # ── Student rows ──
+        for student in students:
+            self.table_grid.add_widget(
+                self._cell_label(student.get("name", ""), NAME_COL_WIDTH)
+            )
+            self.table_grid.add_widget(
+                self._cell_label(student.get("roll_no", ""), ROLL_COL_WIDTH)
+            )
+            attendance = student.get("attendance", {})
+            for d in dates:
+                status = attendance.get(d, None)
+                if status:
+                    short = STATUS_SHORT.get(status, "?")
+                    hex_color = STATUS_COLORS.get(status, "8888AA")
+                    text = f"[color={hex_color}]{short}[/color]"
+                else:
+                    text = "[color=555566]—[/color]"
+                self.table_grid.add_widget(
+                    self._cell_label(text, DATE_COL_WIDTH, markup=True)
+                )
 
     def _show_empty_state(self):
-        self.calendar.set_data({})
-        self.result_label.text = "[color=8888AA]Select a subject to view attendance.[/color]"
+        self.table_grid.clear_widgets()
+        self.table_scroll.height = 0
+        self.table_card.height = ROW_HEIGHT
+        self.empty_label.text = "[color=8888AA]Select a subject to view attendance.[/color]"
+        self.empty_label.opacity = 1
+        self.empty_label.disabled = False
         self.report_status.text = ""
-
-    def _on_view_change(self, name):
-        show_calendar = (name == "Calendar")
-        self.calendar.opacity = 1 if show_calendar else 0
-        self.calendar.disabled = not show_calendar
-        self.calendar.height = self.calendar.height if show_calendar else 0
-        self.table_card.opacity = 0 if show_calendar else 1
-        self.table_card.disabled = show_calendar
-        self.table_card.height = 0 if show_calendar else 260
 
     def start_class(self, instance):
         if not self.selected_course:
@@ -231,6 +321,18 @@ class TeacherDashboardScreen(Screen):
             self.report_status.text = f"[color=00E676]Saved monthly report to {path}[/color]"
         else:
             self.report_status.text = "[color=FFAB40]No sessions found this month.[/color]"
+
+    def export_total(self, instance):
+        if not self.selected_course:
+            self.report_status.text = "[color=FF5252]Select a subject first.[/color]"
+            return
+
+        path = export_total_report(self.selected_course["course_id"])
+
+        if path:
+            self.report_status.text = f"[color=00E676]Saved total course report to {path}[/color]"
+        else:
+            self.report_status.text = "[color=FFAB40]No sessions found for this course.[/color]"
 
     def logout(self, instance):
         SessionState.teacher = None

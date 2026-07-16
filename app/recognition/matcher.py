@@ -5,7 +5,7 @@ from collections import defaultdict
 from app.services.supabase_client import supabase
 from app.database.course_queries import get_students_for_course
 
-THRESHOLD = 0.60  # Relaxed from 0.70 — distant/augmented embeddings score lower
+THRESHOLD = 0.30 
 
 
 def _parse_embedding(raw):

@@ -18,7 +18,6 @@ class BaseAuthScreen(Screen):
     table they authenticate against.
     """
 
-    icon = "👤"
     title_text = "Sign In"
     description = "Sign in with your email and password"
     accent_color = TEXT_WHITE
@@ -38,13 +37,12 @@ class BaseAuthScreen(Screen):
             orientation="vertical",
             spacing=16,
             padding=[36, 36, 36, 36],
-            size_hint=(0.88, 0.66),
+            size_hint=(0.88, 0.58),
             pos_hint={"center_x": 0.5, "center_y": 0.5}
         )
 
-        icon_label = Label(text=self.icon, font_size=44, size_hint=(1, 0.16))
         title = Label(
-            text=self.title_text, font_size=FONT_SIZE_TITLE, bold=True,
+            text=self.title_text, font_size=FONT_SIZE_TITLE + 4, bold=True,
             color=TEXT_WHITE, size_hint=(1, 0.1)
         )
         desc = Label(
@@ -74,7 +72,6 @@ class BaseAuthScreen(Screen):
         back_btn = GhostButton(text="← Back", size_hint=(1, 0.08))
         back_btn.bind(on_press=self.go_back)
 
-        card.add_widget(icon_label)
         card.add_widget(title)
         card.add_widget(desc)
         card.add_widget(spacer)

@@ -66,16 +66,10 @@ DEVICE   = os.getenv("DEVICE", "cpu")      # "cpu" or "cuda"
 CAM_INDEX      = int(os.getenv("CAM_INDEX", "0"))
 SHOW_FPS       = os.getenv("SHOW_FPS", "1") == "1"
 WINDOW_NAME    = os.getenv("WINDOW_NAME", "Face Recognition Attendance System")
-MOBILE_CAM_URL = os.getenv("MOBILE_CAM_URL", "http://192.168.1.4:8080/video")
+MOBILE_CAM_URL = os.getenv("MOBILE_CAM_URL", "http://192.168.1.3:8080/video")
 
 
 # -------------------------------------------------------------
 # FACE RECOGNITION (ArcFace ONNX)
 # -------------------------------------------------------------
 FACE_RECOGNITION_MODEL = FR_DIR / "w600k_r50.onnx"
-
-
-# -------------------------------------------------------------
-# FACE LANDMARK DETECTOR (5-point ONNX)
-# -------------------------------------------------------------
-LANDMARK_MODEL = LM_DIR / "scrfd_10g_bnkps.onnx"       # NEW

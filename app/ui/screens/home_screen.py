@@ -30,15 +30,13 @@ class HomeScreen(Screen):
             orientation="vertical",
             spacing=20,
             padding=[40, 40, 40, 40],
-            size_hint=(0.88, 0.72),
+            size_hint=(0.88, 0.62),
             pos_hint={"center_x": 0.5, "center_y": 0.48}
         )
 
-        icon_label = Label(text="🎓", font_size=52, size_hint=(1, 0.22))
-
         title = Label(
             text="Smart Classroom",
-            font_size=FONT_SIZE_TITLE,
+            font_size=FONT_SIZE_TITLE + 4,
             bold=True,
             color=TEXT_WHITE,
             size_hint=(1, 0.12)
@@ -55,14 +53,14 @@ class HomeScreen(Screen):
 
         teacher_btn = RoundedButton(
             fill_color=PRIMARY,
-            text="👨‍🏫  Teacher Login",
+            text="Teacher Login",
             size_hint=(1, 0.14),
         )
         teacher_btn.bind(on_press=self.go_teacher_login)
 
         student_btn = OutlineButton(
             outline_color=SECONDARY,
-            text="🎒  Student Login",
+            text="Student Login",
             size_hint=(1, 0.14),
         )
         student_btn.bind(on_press=self.go_student_login)
@@ -74,7 +72,6 @@ class HomeScreen(Screen):
             size_hint=(1, 0.06)
         )
 
-        card.add_widget(icon_label)
         card.add_widget(title)
         card.add_widget(subtitle)
         card.add_widget(spacer)

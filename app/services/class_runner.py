@@ -10,7 +10,6 @@ from app.config.config import (
 )
 
 from app.detection.face_detector import FaceDetector
-from app.landmarks.landmark_detector import LandmarkDetector
 from app.recognition.face_recognizer import FaceRecognizer
 from app.recognition.matcher import Matcher
 from app.services.supabase_client import supabase
@@ -108,7 +107,6 @@ def run_class(course_id):
         img_size=IMG_SIZE
     )
 
-    landm = LandmarkDetector()
     recognizer = FaceRecognizer(device=DEVICE)
     matcher = Matcher(course_id)
 
@@ -117,7 +115,7 @@ def run_class(course_id):
     # --------------------------------
     # Camera
     # --------------------------------
-    USE_MOBILE_CAMERA = False
+    USE_MOBILE_CAMERA = True
 
     if USE_MOBILE_CAMERA:
         cap = cv2.VideoCapture(MOBILE_CAM_URL)
