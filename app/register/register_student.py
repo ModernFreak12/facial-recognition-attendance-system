@@ -8,7 +8,7 @@ from datetime import datetime
 from app.services.supabase_client import supabase
 from app.config.config import (
     WEIGHTS_PATH, CONF, IOU, IMG_SIZE, DEVICE,
-    MOBILE_CAM_URL
+    MOBILE_CAM_URL, USE_MOBILE_CAMERA
 )
 from app.detection.face_detector import FaceDetector
 from app.recognition.face_recognizer import FaceRecognizer
@@ -17,9 +17,8 @@ from app.recognition.face_recognizer import FaceRecognizer
 # ------------------------------------------------------------
 #   CONFIG
 # ------------------------------------------------------------
-UNIV_ROLL_NO   = "12200222047"    # <-- CHANGE THIS
-NUM_CAPTURES   = 1                # Press SPACE 6 times from different angles/positions
-USE_MOBILE_CAM = True
+UNIV_ROLL_NO   = "12200222032"    # <-- CHANGE THIS
+NUM_CAPTURES   = 1              
 
 
 # ------------------------------------------------------------
@@ -38,8 +37,6 @@ USE_MOBILE_CAM = True
 #     J. Noise                    (Gaussian)
 #     K. Combined scenarios       (distance + lighting)
 #
-#   Total: 30 augmented versions per capture
-#   Total embeddings before mean: NUM_CAPTURES × 30 = 180
 #   Stored in DB: 1 mean embedding per student
 # ------------------------------------------------------------
 
@@ -269,7 +266,7 @@ def main():
     detector   = FaceDetector(Path(WEIGHTS_PATH), device=DEVICE, conf=CONF, iou=IOU, img_size=IMG_SIZE)
     recognizer = FaceRecognizer(device=DEVICE)
 
-    src = MOBILE_CAM_URL if USE_MOBILE_CAM else 0
+    src = MOBILE_CAM_URL if USE_MOBILE_CAMERA else 0
     cap = cv2.VideoCapture(src)
     if not cap.isOpened():
         print("[!] Could not open camera.")

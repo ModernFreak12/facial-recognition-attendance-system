@@ -9,7 +9,7 @@ ultralytics
 opencv-python
 onnxruntime
 onnx
-
+kivy
 
 Pillow
 

@@ -10,7 +10,6 @@ ROOT = Path(__file__).resolve().parents[1]
 MODELS_DIR = ROOT / "models"
 FD_DIR     = MODELS_DIR / "face_detection"
 FR_DIR     = MODELS_DIR / "face_recognition"
-LM_DIR     = MODELS_DIR / "face_landmarks"       # NEW
 
 
 # -------------------------------------------------------------
@@ -54,9 +53,9 @@ def _auto_weights() -> Path:
 # Allow override via environment variable
 WEIGHTS_PATH = Path(os.getenv("WEIGHTS_PATH", _auto_weights()))
 
-CONF     = float(os.getenv("CONF", "0.4"))
+CONF     = float(os.getenv("CONF", "0.6"))
 IOU      = float(os.getenv("IOU", "0.5"))
-IMG_SIZE = int(os.getenv("IMG_SIZE", "2208"))
+IMG_SIZE = int(os.getenv("IMG_SIZE", "640"))
 DEVICE   = os.getenv("DEVICE", "cpu")      # "cpu" or "cuda"
 
 
@@ -67,7 +66,7 @@ CAM_INDEX      = int(os.getenv("CAM_INDEX", "0"))
 SHOW_FPS       = os.getenv("SHOW_FPS", "1") == "1"
 WINDOW_NAME    = os.getenv("WINDOW_NAME", "Face Recognition Attendance System")
 MOBILE_CAM_URL = os.getenv("MOBILE_CAM_URL", "http://192.168.1.3:8080/video")
-
+USE_MOBILE_CAMERA = False
 
 # -------------------------------------------------------------
 # FACE RECOGNITION (ArcFace ONNX)

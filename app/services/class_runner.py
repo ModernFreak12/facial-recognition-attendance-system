@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 from app.config.config import (
     WEIGHTS_PATH, CONF, IOU, IMG_SIZE, DEVICE,
-    CAM_INDEX, SHOW_FPS, WINDOW_NAME, MOBILE_CAM_URL
+    CAM_INDEX, SHOW_FPS, WINDOW_NAME, MOBILE_CAM_URL, USE_MOBILE_CAMERA
 )
 
 from app.detection.face_detector import FaceDetector
@@ -115,8 +115,6 @@ def run_class(course_id):
     # --------------------------------
     # Camera
     # --------------------------------
-    USE_MOBILE_CAMERA = True
-
     if USE_MOBILE_CAMERA:
         cap = cv2.VideoCapture(MOBILE_CAM_URL)
     else:
